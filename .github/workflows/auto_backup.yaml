@@ -2,54 +2,60 @@ name: Auto-Download Minecraft Files from BisectHosting SFTP
 
 on:
   schedule:
-    - cron: '0 4 * * *'          # Daily at 04:00 UTC – change to your preferred time
-  workflow_dispatch:             # Allows manual trigger from GitHub Actions tab
+    - cron: '0 4 * * *'          # Daily at 04:00 UTC – adjust as needed
+  workflow_dispatch:             # Manual trigger
 
 jobs:
   download-and-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30          # Overall job timeout in case of major hang
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0           # Full history needed for committing changes
+          fetch-depth: 0
 
-      - name: Install lftp (usually pre-installed, but ensure)
+      - name: Install lftp
         run: |
           sudo apt-get update
           sudo apt-get install -y lftp
 
-      - name: Download files from Bisect SFTP using lftp mirror
+      - name: Download files from Bisect SFTP (with debug & anti-hang settings)
         env:
           SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
-          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
+          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '2022' }}
           SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
-          SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD || '' }}
+          SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD }}
         run: |
-          mkdir -p downloaded-world downloaded-plugins downloaded-config
+          mkdir -p downloaded-world
 
-          lftp -u "$SFTP_USER,$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT" <<EOF
+          # Use timeout command to kill if stuck >10 min
+          timeout 600 lftp -v -v -c <<EOF || echo "lftp timed out or failed - check full logs"
+          set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          set net:timeout 15
+          set net:max-retries 2
+          set net:reconnect-interval-base 3
           set sftp:auto-confirm yes
-          set net:timeout 30
-          set net:max-retries 3
-          set net:reconnect-interval-base 5
 
-          # Mirror world folder (core Minecraft save data)
-          # mirror --verbose --parallel=4 world/ ./downloaded-world/
+          open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-          # Optional: mirror plugins and config folders (uncomment if needed)
-          # mirror --verbose --parallel=4 plugins/ ./downloaded-plugins/
-          mirror --verbose --parallel=4 config/ ./downloaded-config/
+          # Test basic connection first
+          ls
+
+          # Mirror with debug; add --dry-run to test without downloading
+          mirror --verbose --parallel=2 --timeout=30 --use-cache=no world/ ./downloaded-world/
 
           quit
           EOF
 
-      - name: Commit and push downloaded files to repo
+          echo "lftp exit code: $?"
+          ls -la downloaded-world/   # Show if anything was actually downloaded
+
+      - name: Commit and push if files were downloaded
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "actions@github.com"
-
-          git add downloaded-world/ downloaded-plugins/ downloaded-config/ || true
-          git commit -m "Automated SFTP download from BisectHosting - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes to commit (files unchanged)"
-          git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no changes"
+          git add downloaded-world/ || true
+          git commit -m "Automated SFTP download attempt - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes"
+          git push origin HEAD:${{ github.ref_name }} || echo "Push skipped"
