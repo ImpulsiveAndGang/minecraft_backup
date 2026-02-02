@@ -2,7 +2,7 @@ name: Auto-Download Config Folder from BisectHosting SFTP
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # Runs daily at 04:00 UTC
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -34,28 +34,27 @@ jobs:
           mkdir -p downloaded-config
 
           echo "▶ Connecting to SFTP and downloading config"
-          lftp -d <<EOF
-          set sftp:auto-confirm yes
-          set net:timeout 20
-          set net:max-retries 2
-          set net:reconnect-interval-base 3
+          lftp -d <<-EOF
+		set cmd:verbose yes
+		set sftp:auto-confirm yes
+		set net:timeout 20
+		set net:max-retries 2
+		set net:reconnect-interval-base 3
 
-          open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
+		open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-          pwd
-          ls -la
+		pwd
+		ls -la
 
-          # Adjust this if BisectHosting uses a subdirectory (e.g. container/config)
-          mirror --verbose config downloaded-config
+		mirror --verbose config downloaded-config
 
-          quit
-          EOF
+		quit
+		EOF
 
           echo "▶ Download completed"
           echo "▶ Downloaded files:"
           ls -laR downloaded-config
 
-          # Fail if nothing was downloaded
           if [ -z "$(ls -A downloaded-config)" ]; then
             echo "❌ No files downloaded — failing job"
             exit 1
