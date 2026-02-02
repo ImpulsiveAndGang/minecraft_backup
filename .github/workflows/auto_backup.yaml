@@ -2,63 +2,75 @@ name: Auto-Download Config Folder from BisectHosting SFTP
 
 on:
   schedule:
-    - cron: '0 4 * * *'          # Daily at 04:00 UTC – change if needed (e.g., '0 0 * * 0' for weekly Sundays)
-  workflow_dispatch:             # Manual run option
+    - cron: '0 4 * * *'           # Runs daily at 04:00 UTC
+  workflow_dispatch:              # Allows manual triggering from the Actions tab
 
 jobs:
-  download-and-commit:
+  download-config:
     runs-on: ubuntu-latest
-    timeout-minutes: 15          # Shorter overall timeout since we're only grabbing configs
+    timeout-minutes: 15           # Safety timeout for the whole job
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0          # Needed for proper git commit history
 
       - name: Install lftp
         run: |
           sudo apt-get update
           sudo apt-get install -y lftp
 
-      - name: Download config folder from Bisect SFTP (debug enabled)
+      - name: Download config folder via SFTP (with diagnostics)
         env:
-          SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
-          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
-          SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
-          SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD }}
+          SFTP_HOST:     ${{ secrets.BISECT_SFTP_HOST }}
+          SFTP_PORT:     ${{ secrets.BISECT_SFTP_PORT || '22' }}
+          SFTP_USER:     ${{ secrets.BISECT_SFTP_USERNAME }}
+          SFTP_PASS:     ${{ secrets.BISECT_SFTP_PASSWORD }}
         run: |
           mkdir -p downloaded-config
 
-          timeout 300 lftp -v -v <<EOF || echo "lftp failed/timed out (exit $?) - see logs above for details"
-          set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          set net:timeout 15
-          set net:max-retries 2
-          set net:reconnect-interval-base 3
-          set sftp:auto-confirm yes
-          set cmd:fail-exit true
-          set cmd:verbose true
+          timeout 300 lftp -v -v <<'EOF' || echo "lftp command failed or timed out (exit code $?) - see detailed logs above"
+            set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            set net:timeout 15
+            set net:max-retries 2
+            set net:reconnect-interval-base 3
+            set sftp:auto-confirm yes
+            set cmd:fail-exit true
+            set cmd:verbose true
 
-          open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
+            # Connect
+            open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-          # Verify we're in root and config exists
-          pwd
-          ls -la
-          ls -la config/ || echo "Config folder not found or empty - check path"
+            # Show where we are and what's in root
+            pwd
+            ls -la
 
-          # Mirror only the config folder
-          mirror --verbose --parallel=2 --timeout=30 config/ ./downloaded-config/
+            # Check specifically for config folder
+            echo "=== Checking for config folder ==="
+            ls -la config/ 2>/dev/null || echo "→ config/ folder not found or inaccessible in root"
 
-          quit
+            # If folder exists, download it
+            echo "=== Starting mirror of config/ ==="
+            mirror --verbose --parallel=2 --timeout=30 config/ ./downloaded-config/ || echo "mirror failed - folder may be empty or missing"
+
+            quit
           EOF
 
-          echo "lftp exit code: $?"
-          ls -laR downloaded-config/   # List all downloaded files/subfolders in logs
+          echo "lftp finished with exit code $?"
+          echo "Downloaded files:"
+          ls -laR downloaded-config/ || echo "downloaded-config/ is empty"
 
-      - name: Commit and push downloaded config (if changed)
+      - name: Commit downloaded config files (if any changes)
         run: |
-          git config --global user.name "GitHub Action Bot"
+          git config --global user.name  "GitHub Action Bot"
           git config --global user.email "actions@github.com"
+
           git add downloaded-config/ || true
-          git commit -m "Automated download of config folder from BisectHosting - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes detected"
-          git push origin HEAD:${{ github.ref_name }} || echo "Push skipped"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Automated download of config folder from BisectHosting - $(date +'%Y-%m-%d %H:%M UTC')"
+            git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no upstream changes"
+          fi
