@@ -36,11 +36,11 @@ jobs:
           set net:reconnect-interval-base 5
 
           # Mirror world folder (core Minecraft save data)
-          mirror --verbose --parallel=4 world/ ./downloaded-world/
+          # mirror --verbose --parallel=4 world/ ./downloaded-world/
 
           # Optional: mirror plugins and config folders (uncomment if needed)
           # mirror --verbose --parallel=4 plugins/ ./downloaded-plugins/
-          # mirror --verbose --parallel=4 config/ ./downloaded-config/
+          mirror --verbose --parallel=4 config/ ./downloaded-config/
 
           quit
           EOF
