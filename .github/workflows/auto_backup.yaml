@@ -1,0 +1,41 @@
+name: Auto-Download from BisectHosting SFTP
+
+on:
+  schedule:
+    - cron: '0 0 * * *'          # Daily at 0:00 UTC (adjust to your timezone/preference)
+  workflow_dispatch:             # Allows manual run from Actions tab
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # Full history if you want to commit changes
+
+      - name: Download files via SFTP
+        uses: appleboy/scp-action@v0.1.7  # Reliable for download (SCP over SSH/SFTP)
+        with:
+          host: ${{ secrets.BISECT_SFTP_HOST }}
+          username: ${{ secrets.BISECT_SFTP_USERNAME }}
+          password: ${{ secrets.BISECT_SFTP_PASSWORD || '' }}    # Optional if using key
+          port: ${{ secrets.BISECT_SFTP_PORT || '22' }}
+          source: "world/,plugins/,config/"   # Folders/files to download (comma-separated; use quotes if wildcards)
+          target: "./downloaded-server-files" # Local folder in runner
+          direction: download                 # Important: download mode
+          strip_components: 0                 # Keep folder structure
+
+      # Optional: Zip the download if repo size is concern
+      - name: Zip downloaded files
+        run: zip -r server-files-$(date +%Y-%m-%d).zip downloaded-server-files
+
+      # Commit and push to repo (creates backup history)
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
+          git add downloaded-server-files/ *.zip || true
+          git commit -m "Automated download from BisectHosting - $(date +%Y-%m-%d)" || echo "No changes to commit"
+          git push
