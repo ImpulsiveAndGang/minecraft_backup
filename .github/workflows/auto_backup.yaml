@@ -1,41 +1,55 @@
-name: Auto-Download from BisectHosting SFTP
+name: Auto-Download Minecraft Files from BisectHosting SFTP
 
 on:
   schedule:
-    - cron: '0 0 * * *'          # Daily at 0:00 UTC (adjust to your timezone/preference)
-  workflow_dispatch:             # Allows manual run from Actions tab
+    - cron: '0 4 * * *'          # Daily at 04:00 UTC – change to your preferred time
+  workflow_dispatch:             # Allows manual trigger from GitHub Actions tab
 
 jobs:
-  download:
+  download-and-commit:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0           # Full history if you want to commit changes
+          fetch-depth: 0           # Full history needed for committing changes
 
-      - name: Download files via SFTP
-        uses: appleboy/scp-action@v0.1.7  # Reliable for download (SCP over SSH/SFTP)
-        with:
-          host: ${{ secrets.BISECT_SFTP_HOST }}
-          username: ${{ secrets.BISECT_SFTP_USERNAME }}
-          password: ${{ secrets.BISECT_SFTP_PASSWORD || '' }}    # Optional if using key
-          port: ${{ secrets.BISECT_SFTP_PORT || '22' }}
-          source: "world/,plugins/,config/"   # Folders/files to download (comma-separated; use quotes if wildcards)
-          target: "./downloaded-server-files" # Local folder in runner
-          direction: download                 # Important: download mode
-          strip_components: 0                 # Keep folder structure
+      - name: Install lftp (usually pre-installed, but ensure)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
 
-      # Optional: Zip the download if repo size is concern
-      - name: Zip downloaded files
-        run: zip -r server-files-$(date +%Y-%m-%d).zip downloaded-server-files
+      - name: Download files from Bisect SFTP using lftp mirror
+        env:
+          SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
+          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
+          SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
+          SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD || '' }}
+        run: |
+          mkdir -p downloaded-world downloaded-plugins downloaded-config
 
-      # Commit and push to repo (creates backup history)
-      - name: Commit and push changes
+          lftp -u "$SFTP_USER,$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT" <<EOF
+          set sftp:auto-confirm yes
+          set net:timeout 30
+          set net:max-retries 3
+          set net:reconnect-interval-base 5
+
+          # Mirror world folder (core Minecraft save data)
+          mirror --verbose --parallel=4 world/ ./downloaded-world/
+
+          # Optional: mirror plugins and config folders (uncomment if needed)
+          # mirror --verbose --parallel=4 plugins/ ./downloaded-plugins/
+          # mirror --verbose --parallel=4 config/ ./downloaded-config/
+
+          quit
+          EOF
+
+      - name: Commit and push downloaded files to repo
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "actions@github.com"
-          git add downloaded-server-files/ *.zip || true
-          git commit -m "Automated download from BisectHosting - $(date +%Y-%m-%d)" || echo "No changes to commit"
-          git push
+
+          git add downloaded-world/ downloaded-plugins/ downloaded-config/ || true
+          git commit -m "Automated SFTP download from BisectHosting - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes to commit (files unchanged)"
+          git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no changes"
