@@ -2,19 +2,19 @@ name: Auto-Download Config Folder from BisectHosting SFTP
 
 on:
   schedule:
-    - cron: '0 4 * * *'           # Runs daily at 04:00 UTC
-  workflow_dispatch:              # Allows manual triggering from the Actions tab
+    - cron: '0 4 * * *'   # Runs daily at 04:00 UTC
+  workflow_dispatch:
 
 jobs:
   download-config:
     runs-on: ubuntu-latest
-    timeout-minutes: 15           # Safety timeout for the whole job
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # Needed for proper git commit history
+          fetch-depth: 0
 
       - name: Install lftp
         run: |
@@ -23,47 +23,54 @@ jobs:
 
       - name: Download config folder via SFTP
         env:
-            SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
-            SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
-            SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
-            SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD }}
+          SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
+          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
+          SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
+          SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD }}
         run: |
           set -euxo pipefail
 
           echo "▶ Creating local directory"
           mkdir -p downloaded-config
 
-          echo "▶ Starting lftp session"
+          echo "▶ Connecting to SFTP and downloading config"
           lftp -d <<EOF
-            set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-            set net:timeout 15
-            set net:max-retries 2
-            set net:reconnect-interval-base 3
-            set sftp:auto-confirm yes
+          set sftp:auto-confirm yes
+          set net:timeout 20
+          set net:max-retries 2
+          set net:reconnect-interval-base 3
 
-            open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
+          open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-            ls -la
+          pwd
+          ls -la
 
-            cls -la config
-            mirror --verbose --parallel=2 --timeout=30 config downloaded-config
+          # Adjust this if BisectHosting uses a subdirectory (e.g. container/config)
+          mirror --verbose config downloaded-config
 
-            quit
-            EOF
-          echo "▶ lftp finished"
+          quit
+          EOF
+
+          echo "▶ Download completed"
           echo "▶ Downloaded files:"
-          ls -laR downloaded-config || true
+          ls -laR downloaded-config
 
-      - name: Commit downloaded config files (if any changes)
+          # Fail if nothing was downloaded
+          if [ -z "$(ls -A downloaded-config)" ]; then
+            echo "❌ No files downloaded — failing job"
+            exit 1
+          fi
+
+      - name: Commit downloaded config files (if changed)
         run: |
           git config --global user.name  "GitHub Action Bot"
           git config --global user.email "actions@github.com"
 
-          git add downloaded-config/ || true
+          git add downloaded-config
 
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "▶ No changes to commit"
           else
-            git commit -m "Automated download of config folder from BisectHosting - $(date +'%Y-%m-%d %H:%M UTC')"
-            git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no upstream changes"
+            git commit -m "Automated download of config folder from BisectHosting - $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push origin HEAD:${{ github.ref_name }}
           fi
