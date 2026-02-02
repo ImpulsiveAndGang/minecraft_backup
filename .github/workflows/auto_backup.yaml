@@ -1,14 +1,14 @@
-name: Auto-Download Minecraft Files from BisectHosting SFTP
+name: Auto-Download Config Folder from BisectHosting SFTP
 
 on:
   schedule:
-    - cron: '0 4 * * *'          # Daily at 04:00 UTC – adjust as needed
-  workflow_dispatch:             # Manual trigger
+    - cron: '0 4 * * *'          # Daily at 04:00 UTC – change if needed (e.g., '0 0 * * 0' for weekly Sundays)
+  workflow_dispatch:             # Manual run option
 
 jobs:
   download-and-commit:
     runs-on: ubuntu-latest
-    timeout-minutes: 30          # Overall job timeout in case of major hang
+    timeout-minutes: 15          # Shorter overall timeout since we're only grabbing configs
 
     steps:
       - name: Checkout repository
@@ -21,41 +21,44 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lftp
 
-      - name: Download files from Bisect SFTP (with debug & anti-hang settings)
+      - name: Download config folder from Bisect SFTP (debug enabled)
         env:
           SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
-          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '2022' }}
+          SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
           SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
           SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD }}
         run: |
-          mkdir -p downloaded-world
+          mkdir -p downloaded-config
 
-          # Use timeout command to kill if stuck >10 min
-          timeout 600 lftp -v -v -c <<EOF || echo "lftp timed out or failed - check full logs"
+          timeout 300 lftp -v -v <<EOF || echo "lftp failed/timed out (exit $?) - see logs above for details"
           set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           set net:timeout 15
           set net:max-retries 2
           set net:reconnect-interval-base 3
           set sftp:auto-confirm yes
+          set cmd:fail-exit true
+          set cmd:verbose true
 
           open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-          # Test basic connection first
-          ls
+          # Verify we're in root and config exists
+          pwd
+          ls -la
+          ls -la config/ || echo "Config folder not found or empty - check path"
 
-          # Mirror with debug; add --dry-run to test without downloading
-          mirror --verbose --parallel=2 --timeout=30 --use-cache=no world/ ./downloaded-world/
+          # Mirror only the config folder
+          mirror --verbose --parallel=2 --timeout=30 config/ ./downloaded-config/
 
           quit
           EOF
 
           echo "lftp exit code: $?"
-          ls -la downloaded-world/   # Show if anything was actually downloaded
+          ls -laR downloaded-config/   # List all downloaded files/subfolders in logs
 
-      - name: Commit and push if files were downloaded
+      - name: Commit and push downloaded config (if changed)
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "actions@github.com"
-          git add downloaded-world/ || true
-          git commit -m "Automated SFTP download attempt - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes"
+          git add downloaded-config/ || true
+          git commit -m "Automated download of config folder from BisectHosting - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes detected"
           git push origin HEAD:${{ github.ref_name }} || echo "Push skipped"
