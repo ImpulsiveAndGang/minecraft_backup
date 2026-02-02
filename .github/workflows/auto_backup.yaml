@@ -52,7 +52,7 @@ jobs:
 
             # If folder exists, download it
             echo "=== Starting mirror of config/ ==="
-            mirror --verbose --parallel=2 --timeout=30 config/ ./downloaded-config/ || echo "mirror failed - folder may be empty or missing"
+            mirror --verbose --parallel=2 --timeout=30 /config/ ./downloaded-config/ || echo "mirror failed - folder may be empty or missing"
 
             quit
           EOF
