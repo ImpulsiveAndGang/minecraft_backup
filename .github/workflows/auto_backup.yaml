@@ -35,22 +35,21 @@ jobs:
 
           echo "▶ Starting lftp session"
           lftp -d <<EOF
-set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-set net:timeout 15
-set net:max-retries 2
-set net:reconnect-interval-base 3
-set sftp:auto-confirm yes
+            set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            set net:timeout 15
+            set net:max-retries 2
+            set net:reconnect-interval-base 3
+            set sftp:auto-confirm yes
 
-open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
+            open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-ls -la
+            ls -la
 
-cls -la config
-mirror --verbose --parallel=2 --timeout=30 config downloaded-config
+            cls -la config
+            mirror --verbose --parallel=2 --timeout=30 config downloaded-config
 
-quit
-EOF
-
+            quit
+            EOF
           echo "▶ lftp finished"
           echo "▶ Downloaded files:"
           ls -laR downloaded-config || true
