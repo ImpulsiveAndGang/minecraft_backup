@@ -21,45 +21,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lftp
 
-      - name: Download config folder via SFTP (with diagnostics)
+      - name: Download config folder via SFTP
         env:
-          SFTP_HOST:     ${{ secrets.BISECT_SFTP_HOST }}
-          SFTP_PORT:     ${{ secrets.BISECT_SFTP_PORT || '22' }}
-          SFTP_USER:     ${{ secrets.BISECT_SFTP_USERNAME }}
-          SFTP_PASS:     ${{ secrets.BISECT_SFTP_PASSWORD }}
+            SFTP_HOST: ${{ secrets.BISECT_SFTP_HOST }}
+            SFTP_PORT: ${{ secrets.BISECT_SFTP_PORT || '22' }}
+            SFTP_USER: ${{ secrets.BISECT_SFTP_USERNAME }}
+            SFTP_PASS: ${{ secrets.BISECT_SFTP_PASSWORD }}
         run: |
+          set -euxo pipefail
+
+          echo "▶ Creating local directory"
           mkdir -p downloaded-config
 
-          timeout 300 lftp -v -v <<'EOF' || echo "lftp command failed or timed out (exit code $?) - see detailed logs above"
-            set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-            set net:timeout 15
-            set net:max-retries 2
-            set net:reconnect-interval-base 3
-            set sftp:auto-confirm yes
-            set cmd:fail-exit true
-            set cmd:verbose true
+          echo "▶ Starting lftp session"
+          lftp -d <<EOF
+set sftp:connect-program "ssh -a -x -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+set net:timeout 15
+set net:max-retries 2
+set net:reconnect-interval-base 3
+set sftp:auto-confirm yes
 
-            # Connect
-            open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
+open -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT"
 
-            # Show where we are and what's in root
-            pwd
-            ls -la
+ls -la
 
-            # Check specifically for config folder
-            echo "=== Checking for config folder ==="
-            ls -la config/ 2>/dev/null || echo "→ config/ folder not found or inaccessible in root"
+cls -la config
+mirror --verbose --parallel=2 --timeout=30 config downloaded-config
 
-            # If folder exists, download it
-            echo "=== Starting mirror of config/ ==="
-            mirror --verbose --parallel=2 --timeout=30 /config/ ./downloaded-config/ || echo "mirror failed - folder may be empty or missing"
+quit
+EOF
 
-            quit
-          EOF
-
-          echo "lftp finished with exit code $?"
-          echo "Downloaded files:"
-          ls -laR downloaded-config/ || echo "downloaded-config/ is empty"
+          echo "▶ lftp finished"
+          echo "▶ Downloaded files:"
+          ls -laR downloaded-config || true
 
       - name: Commit downloaded config files (if any changes)
         run: |
