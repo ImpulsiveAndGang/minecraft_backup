@@ -32,28 +32,27 @@ jobs:
 
           mkdir -p downloaded-config
 
-          echo "▶ Connecting to SFTP and downloading config"
+          lftp -d -u "$SFTP_USER","$SFTP_PASS" \
+            sftp://"$SFTP_HOST":"$SFTP_PORT" \
+            -e "
+              set cmd:verbose yes;
+              set sftp:auto-confirm yes;
+              set net:timeout 20;
+              set net:max-retries 2;
+              set net:reconnect-interval-base 3;
 
-          lftp -d -u "$SFTP_USER","$SFTP_PASS" sftp://"$SFTP_HOST":"$SFTP_PORT" <<'LFTP_CMDS'
-          set cmd:verbose yes
-          set sftp:auto-confirm yes
-          set net:timeout 20
-          set net:max-retries 2
-          set net:reconnect-interval-base 3
+              pwd;
+              ls -la;
 
-          pwd
-          ls -la
+              mirror --verbose config downloaded-config;
 
-          mirror --verbose config downloaded-config
+              quit;
+            "
 
-          quit
-LFTP_CMDS
-
-          echo "▶ Download completed"
           ls -laR downloaded-config
 
-          if [ -z "$(ls -A downloaded-config)" ]; then
-            echo "❌ No files downloaded — failing job"
+          if [ -z \"\$(ls -A downloaded-config)\" ]; then
+            echo '❌ No files downloaded — failing job'
             exit 1
           fi
 
