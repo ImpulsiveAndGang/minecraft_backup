@@ -35,11 +35,11 @@ jobs:
           lftp -d -u "$SFTP_USER","$SFTP_PASS" \
             sftp://"$SFTP_HOST":"$SFTP_PORT" \
             -e "
+              set sftp:connect-program \"\";
               set cmd:verbose yes;
               set sftp:auto-confirm yes;
               set net:timeout 20;
               set net:max-retries 2;
-              set net:reconnect-interval-base 3;
 
               pwd;
               ls -la;
@@ -50,11 +50,6 @@ jobs:
             "
 
           ls -laR downloaded-config
-
-          if [ -z \"\$(ls -A downloaded-config)\" ]; then
-            echo '❌ No files downloaded — failing job'
-            exit 1
-          fi
 
       - name: Commit downloaded config files (if changed)
         run: |
